@@ -9,6 +9,11 @@
 
 #define MAX_VL 256
 
+typedef struct {
+    int min_count;
+    int max_count;
+} Repetition;
+
 extern "C" char* strcpy(char* dst, const char* src);
 extern "C" bool str_starts_with(char* str, const char* prefix);
 // extern "C" bool str_starts_with_rvv(char* str, const char* prefix);
@@ -83,8 +88,7 @@ bool str_ends_with_rvv(char* str, const char* suffix) {
     return true;
 }
 
-bool str_contains_rvv(const char* str, const char* sub)
-{
+bool str_contains_rvv(const char* str, const char* sub) {
     size_t str_len = std::strlen(str);
     size_t sub_len = std::strlen(sub);
 
@@ -133,8 +137,7 @@ bool str_contains_rvv(const char* str, const char* sub)
 // [^]* : zero or more characters not in the set
 // []{x,y} : x to y characters in the set
 // [^]{x,y} : x to y characters not in the set
-bool fa_pattern_rvv(const char* fa)
-{
+bool fa_pattern_rvv(const char* fa) {
   int min, max;
   // + : min = 1, max = -1
   // * : min = 0, max = -1
@@ -190,8 +193,7 @@ static bool isQuantifier(char c) {
 // input : raphae[^\r\n]{6,}pattie[^\r\n]{5,}bewormed[^\r\n]{10,}reseize[^\r\n]{4,}underestimate
 // ss patterns : {"raphae", "pattie", "bewormed", "reseize", "underestimate"}
 // fa patterns : {"[^\r\n]{6,}", "[^\r\n]{5,}", "[^\r\n]{10,}", "[^\r\n]{4,}"}
-std::vector<std::string> decomposeRegex(const std::string &pattern)
-{
+std::vector<std::string> decomposeRegex(const std::string &pattern) {
     std::vector<std::string> tokens;
     size_t i = 0;
     const size_t len = pattern.size();
@@ -248,11 +250,6 @@ std::vector<std::string> decomposeRegex(const std::string &pattern)
     return tokens;
 }
 
-typedef struct {
-    int min_count;
-    int max_count;
-} Repetition;
-
 Repetition parse_repetition(const char* rep_str) {
     Repetition rep = {0, 0};
 
@@ -283,58 +280,7 @@ Repetition parse_repetition(const char* rep_str) {
     return rep;
 }
 
-// int find_fa_pattern(const char *str, size_t len, int min_len, int max_len, int pattern_type) {
-//     uint8_t forb1 = 0, forb2 = 0;
-//     if (pattern_type == 0) {
-//         forb1 = '\r';
-//     } else if (pattern_type == 1) {
-//         forb1 = '\n';
-//     } else if (pattern_type == 2) {
-//         forb1 = '\r';
-//         forb2 = '\n';
-//     }
-
-//     size_t pos = 0;
-//     int run = 0;
-//     size_t run_start = 0;
-//     bool mask_array[MAX_VL];
-
-//     while (pos < len) {
-//         size_t remaining = len - pos;
-//         size_t vl = __riscv_vsetvl_e8m8(remaining);
-
-//         vuint8m1_t vec = __riscv_vle8_v_u8m1(str + pos, vl);
-//         vbool1_t mask = __riscv_vmseq_vx_u8m1_b1(vec, forb1, vl);
-//         if (pattern_type == 2) {
-//             vbool1_t mask2 = __riscv_vmseq_vx_u8m1_b1(vec, forb2, vl);
-//             mask = __riscv_vmand_mm_b1(mask, mask2);
-//         }
-
-//         __riscv_vse8_v_b8((uint8_t*)mask_array, mask, vl);
-
-//         for (size_t j = 0; j < vl; j++) {
-//             if (mask_array[j]) {
-//                 if (run == 0) {
-//                     run_start = pos + j;
-//                 }
-//                 run++;
-//             } else {
-//                 if (run >= min_len) {
-//                     if (max_len == -1 || run <= max_len) {
-//                         return run_start;
-//                     }
-//                 }
-//                 run = 0;
-//             }
-//         }
-//         pos += vl;
-//     }
-
-//     return -1;
-// }
-
 int find_fa_pattern(const char *str, size_t len, int min_len, int max_len, int pattern_type) {
-    // 금지 문자 설정
     uint8_t forb1 = 0, forb2 = 0;
     if (pattern_type == 0) {
         forb1 = '\r';
@@ -345,47 +291,35 @@ int find_fa_pattern(const char *str, size_t len, int min_len, int max_len, int p
         forb2 = '\n';
     }
 
-    size_t pos = 0;      // 전체 문자열 내 현재 처리 offset
-    int run = 0;         // 현재까지 연속된 allowed 문자의 수
-    size_t run_start = 0;// 현재 run의 시작 offset
+    size_t pos = 0;
+    int run = 0;
+    size_t run_start = 0;
 
-    // 벡터 마스크를 저장할 버퍼:
-    // RISC-V 벡터 boolean은 bit-packed 되어 저장되므로, vl개의 lane을 저장하려면 (vl+7)/8 바이트가 필요함.
     uint8_t mask_buf[(MAX_VL + 7) / 8];
 
     while (pos < len) {
         size_t remaining = len - pos;
-        // 남은 요소에 맞춰 벡터 길이 결정 (8비트 단위)
         size_t vl = __riscv_vsetvl_e8m1(remaining);
 
-        // 메모리에서 8비트 데이터 로드 (캐스팅 필요)
         vuint8m1_t vec = __riscv_vle8_v_u8m1((const unsigned char*)(str + pos), vl);
 
-        // "allowed" 여부: 해당 문자가 금지 문자(forb1)와 **다르다면** true
         vbool8_t mask = __riscv_vmsne_vx_u8m1_b8(vec, forb1, vl);
         if (pattern_type == 2) {
-            // 두 번째 금지 문자에 대해서도 allowed 여부 검사
             vbool8_t mask2 = __riscv_vmsne_vx_u8m1_b8(vec, forb2, vl);
             mask = __riscv_vmand_mm_b8(mask, mask2, vl);
         }
 
-        // 벡터 마스크를 bit-packed 형태로 저장
         __riscv_vsm_v_b8(mask_buf, mask, vl);
 
-        // 각 lane에 대해 언팩하여 allowed 여부를 확인
         for (size_t j = 0; j < vl; j++) {
-            // mask_buf는 비트팩된 상태이므로,
-            // j번째 lane의 결과는 mask_buf[j/8]의 (j % 8)번째 비트에 해당함.
             bool allowed = ((mask_buf[j / 8] >> (j % 8)) & 1) != 0;
 
             if (allowed) {
-                // run이 시작되는 지점이면 run_start 기록
                 if (run == 0) {
                     run_start = pos + j;
                 }
                 run++;
             } else {
-                // 금지 문자가 나온 경우, 지금까지의 run 길이가 조건에 부합하면 매칭된 것으로 반환
                 if (run >= min_len && (max_len == -1 || run <= max_len)) {
                     return run_start;
                 }
@@ -395,7 +329,6 @@ int find_fa_pattern(const char *str, size_t len, int min_len, int max_len, int p
         pos += vl;
     }
 
-    // while 종료 후, 남은 run에 대해 최종 체크
     if (run >= min_len && (max_len == -1 || run <= max_len)) {
         return run_start;
     }
@@ -403,8 +336,7 @@ int find_fa_pattern(const char *str, size_t len, int min_len, int max_len, int p
 }
 
 int find_alternative_substrings(const char *main_str, size_t len,
-                                const char **sub_strs, const int *sub_lens, size_t num_sub)
-{
+                                const char **sub_strs, const int *sub_lens, size_t num_sub) {
     size_t pos = 0;
     while (pos < len) {
         size_t remaining = len - pos;
@@ -449,6 +381,30 @@ int find_alternative_substrings(const char *main_str, size_t len,
     return -1;
 }
 
+// dot_pattern:
+// pattern_type:
+//    1 -> ".*" (always match)
+//    2 -> ".+" (match if len >= 1)
+//    0 -> ".{x,y}" (match if x <= len <= y)
+int dot_pattern(const char *str, size_t len, int min_len, int max_len, int pattern_type) {
+    if (pattern_type == 1) {
+        return 0;
+    }
+    if (pattern_type == 2) {
+        if (len >= 1)
+            return 0;
+        else
+            return -1;
+    }
+    if (pattern_type == 0) {
+        if (len < (size_t)min_len)
+            return -1;
+        if (len > (size_t)max_len)
+            return -1;
+        return 0;
+    }
+    return -1;
+}
 
 int main() {
     const uint32_t seed = 0xdeadbeef;
@@ -514,27 +470,47 @@ int main() {
     std::cout << "Repetition * : min = " << rep1.min_count << ", max = " << rep1.max_count << "\n";
     std::cout << "Repetition {3,7} : min = " << rep2.min_count << ", max = " << rep2.max_count << "\n";
 
-    const char *main_str = "\n\n\n\n\n\nhello,\nworld\n\n\n\n\n\n\n";
-    size_t len = std::strlen(main_str);
-
     int pattern_type = 1;
     int min_len = 3;
     int max_len = 7;
 
+    const char *main_str = "\n\n\n\n\n\nhello,\nworld\n\n\n\n\n\n\n";
+    size_t len = std::strlen(main_str);
+
+    // [^\n]{3,7}
     int offset = find_fa_pattern(main_str, len, min_len, max_len, pattern_type);
 
     std::cout << "Found pattern at offset " << offset << "\n";
-
-    const char *main_str2 = "abcxxxdefghijkl";
-    len = std::strlen(main_str2);
 
     const char *sub_strs[] = {"leo", "ijk", "cxx"};
     const int sub_lens[] = {3, 3, 3};
     size_t num_sub = sizeof(sub_strs) / sizeof(sub_strs[0]);
 
+    const char *main_str2 = "abcxxxdefghijkl";
+    len = std::strlen(main_str2);
+
+    // (leo|ijk|cxx)
     offset = find_alternative_substrings(main_str2, len, sub_strs, sub_lens, num_sub);
 
     std::cout << "Found substring at offset " << offset << "\n";
+
+    const char *main_str3 = "abcd";
+    len = std::strlen(main_str3);
+
+    // .{3,}
+    offset = dot_pattern(main_str3, len, 3, -1, 0);
+
+    std::cout << "Found pattern at offset " << offset << "\n";
+
+    // .+
+    offset = dot_pattern(main_str3, len, 1, -1, 1);
+
+    std::cout << "Found pattern at offset " << offset << "\n";
+
+    // .*
+    offset = dot_pattern(main_str3, len, 0, -1, 2);
+
+    std::cout << "Found pattern at offset " << offset << "\n";
 
     return 0;
 }
