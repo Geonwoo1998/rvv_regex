@@ -5,6 +5,7 @@
 #include <chrono>
 #include <riscv_vector.h>
 #include <string.h>
+#include <cassert>
 #include "common.h"
 
 #define MAX_VL 256
@@ -18,6 +19,30 @@ extern "C" char* strcpy(char* dst, const char* src);
 extern "C" bool str_starts_with(char* str, const char* prefix);
 // extern "C" bool str_starts_with_rvv(char* str, const char* prefix);
 extern "C" void test_illegal_instructions();
+
+static bool isSpecialChar(char c) {
+    switch (c) {
+    case '.':
+    case '^':
+    case '$':
+    case '?':
+    case '*':
+    case '+':
+    case '(':
+    case ')':
+    case '[':
+    case ']':
+    case '|':
+    case '\\':
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool isQuantifier(char c) {
+    return (c == '+' || c == '*' || c == '?');
+}
 
 size_t strlen_vec(char *source) {
   size_t vlmax = __riscv_vsetvlmax_e8m8();
@@ -165,30 +190,6 @@ bool fa_pattern_rvv(const char* fa) {
 // input : raphae[^\r\n]{6,}pattie[^\r\n]{5,}bewormed[^\r\n]{10,}reseize[^\r\n]{4,}underestimate
 // ss patterns : {"raphae", "pattie", "bewormed", "reseize", "underestimate"}
 // fa patterns : {"[^\r\n]{6,}", "[^\r\n]{5,}", "[^\r\n]{10,}", "[^\r\n]{4,}"}
-
-static bool isSpecialChar(char c) {
-    switch (c) {
-    case '.':
-    case '^':
-    case '$':
-    case '?':
-    case '*':
-    case '+':
-    case '(':
-    case ')':
-    case '[':
-    case ']':
-    case '|':
-    case '\\':
-        return true;
-    default:
-        return false;
-    }
-}
-
-static bool isQuantifier(char c) {
-    return (c == '+' || c == '*' || c == '?');
-}
 
 // input : raphae[^\r\n]{6,}pattie[^\r\n]{5,}bewormed[^\r\n]{10,}reseize[^\r\n]{4,}underestimate
 // ss patterns : {"raphae", "pattie", "bewormed", "reseize", "underestimate"}
@@ -406,6 +407,97 @@ int dot_pattern(const char *str, size_t len, int min_len, int max_len, int patte
     return -1;
 }
 
+// --- Unit Tests ---
+
+void test_str_starts_with() {
+    std::cout << "Running test_str_starts_with...\n";
+    char s1[] = "Hello, RISC-V Vector Extension! This is a test string.";
+    assert(str_starts_with_rvv(s1, "Hello, RISC-V Vector Extension!") == true);
+    assert(str_starts_with_rvv(s1, "Hi") == false);
+    std::cout << "test_str_starts_with passed.\n";
+}
+
+void test_str_ends_with() {
+    std::cout << "Running test_str_ends_with...\n";
+    char s1[] = "Hello, RISC-V Vector Extension! This is a test string.";
+    assert(str_ends_with_rvv(s1, "string.") == true);
+    assert(str_ends_with_rvv(s1, "extension!") == false);
+    std::cout << "test_str_ends_with passed.\n";
+}
+
+void test_str_contains() {
+    std::cout << "Running test_str_contains...\n";
+    char s1[] = "Hello, RISC-V Vector Extension! This is a test string.";
+    assert(str_contains_rvv(s1, "RISC-V") == true);
+    assert(str_contains_rvv(s1, "Missing") == false);
+    std::cout << "test_str_contains passed.\n";
+}
+
+void test_decomposeRegex() {
+    std::cout << "Running test_decomposeRegex...\n";
+    const char* pattern = "raphae[^\r\n]{6,}pattie[^\r\n]{5,}bewormed[^\r\n]{10,}reseize[^\r\n]{4,}underestimate";
+    std::vector<std::string> tokens = decomposeRegex(pattern);
+    assert(tokens[0] == "raphae");
+    assert(tokens[1] == "[^\r\n]{6,}");
+    assert(tokens[2] == "pattie");
+    assert(tokens[3] == "[^\r\n]{5,}");
+    assert(tokens[4] == "bewormed");
+    assert(tokens[5] == "[^\r\n]{10,}");
+    assert(tokens[6] == "reseize");
+    assert(tokens[7] == "[^\r\n]{4,}");
+    assert(tokens[8] == "underestimate");
+    std::cout << "test_decomposeRegex passed.\n";
+}
+
+void test_parse_repetition() {
+    std::cout << "Running test_parse_repetition...\n";
+    Repetition rep0 = parse_repetition("+");
+    Repetition rep1 = parse_repetition("*");
+    Repetition rep2 = parse_repetition("{3,7}");
+    assert(rep0.min_count == 1 && rep0.max_count == -1);
+    assert(rep1.min_count == 0 && rep1.max_count == -1);
+    assert(rep2.min_count == 3 && rep2.max_count == 7);
+    std::cout << "test_parse_repetition passed.\n";
+}
+
+void test_find_fa_pattern() {
+    std::cout << "Running test_find_fa_pattern...\n";
+    const char* main_str = "\n\n\n\n\n\nhello,\nworld\n\n\n\n\n\n\n";
+    size_t len = std::strlen(main_str);
+    int offset = find_fa_pattern(main_str, len, 3, 7, 1);
+    assert(offset == 6);
+    std::cout << "test_find_fa_pattern passed.\n";
+}
+
+void test_find_alternative_substrings() {
+    std::cout << "Running test_find_alternative_substrings...\n";
+    const char* main_str2 = "abcxxxdefghijkl";
+    size_t len = std::strlen(main_str2);
+    const char* sub_strs[] = {"leo", "ijk", "cxx"};
+    const int sub_lens[] = {3, 3, 3};
+    size_t num_sub = sizeof(sub_strs) / sizeof(sub_strs[0]);
+    int offset = find_alternative_substrings(main_str2, len, sub_strs, sub_lens, num_sub);
+    assert(offset == 2);
+    std::cout << "test_find_alternative_substrings passed.\n";
+}
+
+void test_dot_pattern() {
+    std::cout << "Running test_dot_pattern...\n";
+    const char* main_str3 = "abcd";
+    size_t len = std::strlen(main_str3);
+    int offset = dot_pattern(main_str3, len, 3, -1, 0);
+    assert(offset == 0);
+    offset = dot_pattern(main_str3, len, 1, -1, 1);
+    assert(offset == 0);
+    offset = dot_pattern(main_str3, len, 0, -1, 2);
+    assert(offset == 0);
+    const char* main_str4 = "ab";
+    len = std::strlen(main_str4);
+    offset = dot_pattern(main_str4, len, 3, -1, 0);
+    assert(offset == -1);
+    std::cout << "test_dot_pattern passed.\n";
+}
+
 int main() {
     const uint32_t seed = 0xdeadbeef;
     srand(seed);
@@ -437,80 +529,14 @@ int main() {
 
     puts(golden == actual ? "PASS" : "FAIL");
 
-
-    char s1[] = "Hello, RISC-V Vector Extension! This is a test string.";
-
-    bool sw = str_starts_with_rvv(s1, "Hello, RISC-V Vector Extension! This is a test");
-
-    std::cout << "Starts with 'Hello, RISC-V Vector Extension! This is a test': " << sw << "\n";
-
-    bool ew = str_ends_with_rvv(s1, "string!");
-
-    std::cout << "Ends with 'string!': " << ew << "\n";
-
-    bool ct = str_contains_rvv(s1, "RISC-V");
-
-    std::cout << "Contains 'RISC-V': " << ct << "\n";
-
-    // const char* pattern = "raphae[^\r\n]{6,}pattie[^\r\n]{5,}bewormed[^\r\n]{10,}reseize[^\r\n]{4,}underestimate";
-    const char* pattern = "raphae[^\r\n]{6,}pattie[^\r\n]{5,}bewormed[^\r\n]{10,}reseize[^\r\n]{4,}underestimate";
-
-    std::vector<std::string> tokens = decomposeRegex(pattern);
-
-    int i = 0;
-    for (const auto &token : tokens) {
-        std::cout << "token # " << i++ << " : " << token << "\n";
-    }
-
-    Repetition rep0 = parse_repetition("+");
-    Repetition rep1 = parse_repetition("*");
-    Repetition rep2 = parse_repetition("{3,7}");
-
-    std::cout << "Repetition + : min = " << rep0.min_count << ", max = " << rep0.max_count << "\n";
-    std::cout << "Repetition * : min = " << rep1.min_count << ", max = " << rep1.max_count << "\n";
-    std::cout << "Repetition {3,7} : min = " << rep2.min_count << ", max = " << rep2.max_count << "\n";
-
-    int pattern_type = 1;
-    int min_len = 3;
-    int max_len = 7;
-
-    const char *main_str = "\n\n\n\n\n\nhello,\nworld\n\n\n\n\n\n\n";
-    size_t len = std::strlen(main_str);
-
-    // [^\n]{3,7}
-    int offset = find_fa_pattern(main_str, len, min_len, max_len, pattern_type);
-
-    std::cout << "Found pattern at offset " << offset << "\n";
-
-    const char *sub_strs[] = {"leo", "ijk", "cxx"};
-    const int sub_lens[] = {3, 3, 3};
-    size_t num_sub = sizeof(sub_strs) / sizeof(sub_strs[0]);
-
-    const char *main_str2 = "abcxxxdefghijkl";
-    len = std::strlen(main_str2);
-
-    // (leo|ijk|cxx)
-    offset = find_alternative_substrings(main_str2, len, sub_strs, sub_lens, num_sub);
-
-    std::cout << "Found substring at offset " << offset << "\n";
-
-    const char *main_str3 = "abcd";
-    len = std::strlen(main_str3);
-
-    // .{3,}
-    offset = dot_pattern(main_str3, len, 3, -1, 0);
-
-    std::cout << "Found pattern at offset " << offset << "\n";
-
-    // .+
-    offset = dot_pattern(main_str3, len, 1, -1, 1);
-
-    std::cout << "Found pattern at offset " << offset << "\n";
-
-    // .*
-    offset = dot_pattern(main_str3, len, 0, -1, 2);
-
-    std::cout << "Found pattern at offset " << offset << "\n";
+    test_str_starts_with();
+    test_str_ends_with();
+    test_str_contains();
+    test_decomposeRegex();
+    test_parse_repetition();
+    test_find_fa_pattern();
+    test_find_alternative_substrings();
+    test_dot_pattern();
 
     return 0;
 }
